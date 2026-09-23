@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Security Event Correlation System</title>
+<style>
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: #0d1117;
+    color: #e6edf3;
+    max-width: 800px;
+    margin: 40px auto;
+    padding: 0 20px;
+  }
+  h1 {
+    font-size: 1.6rem;
+    border-bottom: 1px solid #30363d;
+    padding-bottom: 10px;
+  }
+  .event-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  input, select {
+    background: #161b22;
+    border: 1px solid #30363d;
+    color: #e6edf3;
+    padding: 8px;
+    border-radius: 6px;
+  }
+  input[type="text"] { flex: 1; }
+  button {
+    background: #238636;
+    color: white;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.95rem;
+  }
+  button:hover { background: #2ea043; }
+  button.secondary {
+    background: #21262d;
+    border: 1px solid #30363d;
+  }
+  button.secondary:hover { background: #30363d; }
+  .remove-btn {
+    background: #21262d;
+    border: 1px solid #30363d;
+    padding: 8px 10px;
+  }
+  .remove-btn:hover { background: #da3633; }
+  #result {
+    margin-top: 25px;
+    padding: 16px;
+    border-radius: 8px;
+    display: none;
+  }
+  #result.incident {
+    background: #2d1214;
+    border: 1px solid #da3633;
+  }
+  #result.clear {
+    background: #0f2a1a;
+    border: 1px solid #238636;
+  }
+  .severity {
+    font-weight: bold;
+    font-size: 1.1rem;
+  }
+  #eventList { margin-top: 15px; }
+  .toolbar { display: flex; gap: 10px; margin-top: 12px; }
+</style>
+</head>
+<body>
+
+<h1>🛡️ Security Event Correlation System</h1>
+<p>Add security events below, then analyze them for suspicious activity sequences.</p>
+
+<div id="eventList"></div>
+
+<div class="toolbar">
+  <button class="secondary" onclick="addEventRow()">+ Add Event</button>
+  <button class="secondary" onclick="loadSample()">Load Sample</button>
+  <button onclick="analyzeEvents()">Analyze</button>
+</div>
+
+<div id="result"></div>
+
+<script>
+  const API_URL = "http://localhost:5000/analyze";
+
+  function addEventRow(user = "", type = "failed_login", time = "") {
+    const list = document.getElementById("eventList");
+    const row = document.createElement("div");
+    row.className = "event-row";
+    row.innerHTML = `
+      <input type="text" placeholder="user" value="${user}" class="user-input">
+      <select class="type-input">
+        <option value="failed_login">failed_login</option>
+        <option value="successful_login">successful_login</option>
+        <option value="unusual_file_access">unusual_file_access</option>
+        <option value="password_reset">password_reset</option>
+        <option value="privilege_escalation">privilege_escalation</option>
+        <option value="data_exfiltration">data_exfiltration</option>
+      </select>
+      <input type="text" placeholder="time (e.g. 10:00)" value="${time}" class="time-input">
+      <button class="remove-btn" onclick="this.parentElement.remove()">✕</button>
+    `;
+    row.querySelector(".type-input").value = type;
+    list.appendChild(row);
+  }
+
+  function loadSample() {
+    document.getElementById("eventList").innerHTML = "";
+    addEventRow("user1", "failed_login", "10:00");
+    addEventRow("user1", "successful_login", "10:05");
+    addEventRow("user1", "unusual_file_access", "10:10");
+  }
+
+  async function analyzeEvents() {
+    const rows = document.querySelectorAll(".event-row");
+    const events = Array.from(rows).map(row => ({
+      user: row.querySelector(".user-input").value || "unknown",
+      type: row.querySelector(".type-input").value,
+      time: row.querySelector(".time-input").value || "N/A"
+    }));
+
+    const resultBox = document.getElementById("result");
+
+    if (events.length === 0) {
+      resultBox.style.display = "block";
+      resultBox.className = "";
+      resultBox.innerHTML = "<p>Add at least one event first.</p>";
+      return;
+    }
+
+    resultBox.style.display = "block";
+    resultBox.className = "";
+    resultBox.innerHTML = "<p>Analyzing...</p>";
+
+    try {
+      const response = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ events })
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || "Request failed");
+      }
+
+      const data = await response.json();
+      renderResult(data);
+    } catch (err) {
+      resultBox.className = "";
+      resultBox.innerHTML = `<p>⚠️ Could not reach backend. Make sure app.py is running on port 5000.<br>(${err.message})</p>`;
+    }
+  }
+
+  function renderResult(data) {
+    const resultBox = document.getElementById("result");
+    resultBox.className = data.incident_detected ? "incident" : "clear";
+
+    let eventLog = data.events
+      .map(e => `${e.time} &rarr; ${e.type} (${e.user})`)
+      .join("<br>");
+
+    if (data.incident_detected) {
+      resultBox.innerHTML = `
+        <p class="severity">🚨 SECURITY INCIDENT DETECTED</p>
+        <p><strong>Severity:</strong> ${data.severity}</p>
+        <p><strong>Recommended Response:</strong> ${data.recommended_response}</p>
+        <hr style="border-color:#30363d;">
+        <p><strong>Event Log:</strong><br>${eventLog}</p>
+      `;
+    } else {
+      resultBox.innerHTML = `
+        <p class="severity">✅ No suspicious incident detected</p>
+        <hr style="border-color:#30363d;">
+        <p><strong>Event Log:</strong><br>${eventLog}</p>
+      `;
+    }
+  }
+
+  addEventRow();
+</script>
+
+</body>
+</html>
